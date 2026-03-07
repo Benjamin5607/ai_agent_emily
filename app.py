@@ -2,8 +2,64 @@ import streamlit as st
 import base64
 from groq import Groq
 
+# ==========================================
+# 🌐 다국어 텍스트 사전 (UI Localization)
+# ==========================================
+ui_text = {
+    "한국어": {
+        "sidebar_title": "⚙️ 에밀리 설정 패널",
+        "brain_setting": "🧠 에이전트 두뇌 설정",
+        "select_model": "모델 선택",
+        "temp_slider": "창의성 레벨 (Temperature)",
+        "bg_custom": "🎨 배경화면 커스텀",
+        "bg_upload": "로컬 이미지 선택 (PNG, JPG)",
+        "bg_color": "배경색 지정 (이미지 없을 시)",
+        "api_setting": "🔑 소셜 미디어 API (로컬 캐시)",
+        "pm_setting": "📊 프로젝트 관리 (PM) 기법",
+        "main_title": "🚀 AI PM 에이전트: 에밀리 v4.0",
+        "current_brain": "현재 두뇌",
+        "current_pm": "관리 기법",
+        "idea_label": "💡 진행할 프로젝트 아이디어나 목표를 적어주세요.",
+        "idea_placeholder": "예: AI 기반 다이어트 앱 기획 및 런칭",
+        "need_code": "💻 핵심 기능 개발 코드 작성 (FE/BE)",
+        "need_sns": "📱 소셜 미디어 포스팅 자동 생성 및 배포 시뮬레이션",
+        "start_btn": "✨ 에밀리 PM 가동 시작!",
+        "warning_idea": "프로젝트 내용을 입력해야 시작할 수 있어요!",
+        "sns_status": "🚀 소셜 미디어 자동 배포 상태",
+        "success_msg": "모델을 활용해 모든 프로젝트 세팅을 완료했습니다!"
+    },
+    "English": {
+        "sidebar_title": "⚙️ Emily Settings Panel",
+        "brain_setting": "🧠 Agent Brain Settings",
+        "select_model": "Select Model",
+        "temp_slider": "Creativity Level (Temperature)",
+        "bg_custom": "🎨 Background Customization",
+        "bg_upload": "Upload Local Image (PNG, JPG)",
+        "bg_color": "Select Background Color",
+        "api_setting": "🔑 Social Media API (Local Cache)",
+        "pm_setting": "📊 Project Management Method",
+        "main_title": "🚀 AI PM Agent: Emily v4.0",
+        "current_brain": "Current Brain",
+        "current_pm": "PM Method",
+        "idea_label": "💡 Describe your project idea or goal.",
+        "idea_placeholder": "e.g., Plan and launch an AI diet app",
+        "need_code": "💻 Generate Core Feature Code (FE/BE)",
+        "need_sns": "📱 Auto-Generate & Simulate SNS Posts",
+        "start_btn": "✨ Start Emily PM!",
+        "warning_idea": "Please enter a project idea to start!",
+        "sns_status": "🚀 Social Media Auto-Deployment Status",
+        "success_msg": "Project setup successfully completed using"
+    }
+}
+
 # 1. 페이지 설정
 st.set_page_config(page_title="Emily AI: PM & Marketer", layout="wide")
+
+# ==========================================
+# 사이드바 1: 언어 선택 (가장 먼저 위치)
+# ==========================================
+lang = st.sidebar.selectbox("🌐 인터페이스 언어 / Language", ["한국어", "English"])
+t = ui_text[lang] # 선택된 언어의 텍스트 사전 로드
 
 # ==========================================
 # Groq 클라이언트 초기화 및 모델 로드
@@ -11,7 +67,7 @@ st.set_page_config(page_title="Emily AI: PM & Marketer", layout="wide")
 try:
     client = Groq(api_key=st.secrets["GROQ_API_KEY"])
 except Exception as e:
-    st.error("API 키가 없습니다. Streamlit Secrets에 GROQ_API_KEY를 설정하세요.")
+    st.error("API Error: Please check Streamlit Secrets for GROQ_API_KEY.")
     st.stop()
 
 @st.cache_data(ttl=3600)
@@ -23,71 +79,59 @@ def get_groq_models():
         return ["llama3-70b-8192", "llama3-8b-8192", "mixtral-8x7b-32768"]
 
 # ==========================================
-# 사이드바 (개인화 & API & 모델 설정)
+# 사이드바 2: 나머지 설정들 (다국어 적용)
 # ==========================================
 with st.sidebar:
-    st.title("⚙️ 에밀리 설정 패널")
+    st.title(t["sidebar_title"])
     
-    # [복구 완료!] 모델 선택 및 창의성 설정
-    st.header("🧠 에이전트 두뇌 설정")
-    selected_model = st.selectbox("모델 선택", get_groq_models(), index=0)
-    temp = st.slider("창의성 레벨 (Temperature)", 0.0, 1.0, 0.7, step=0.1)
+    st.header(t["brain_setting"])
+    selected_model = st.selectbox(t["select_model"], get_groq_models(), index=0)
+    temp = st.slider(t["temp_slider"], 0.0, 1.0, 0.7, step=0.1)
     
     st.divider()
     
-    # 배경화면 설정
-    st.header("🎨 배경화면 커스텀")
-    bg_upload = st.file_uploader("로컬 이미지 선택 (PNG, JPG)", type=['png', 'jpg', 'jpeg'])
+    st.header(t["bg_custom"])
+    bg_upload = st.file_uploader(t["bg_upload"], type=['png', 'jpg', 'jpeg'])
     if bg_upload is not None:
         base64_img = base64.b64encode(bg_upload.read()).decode()
         st.markdown(
             f"""
             <style>
-            .stApp {{
-                background-image: url("data:image/png;base64,{base64_img}");
-                background-size: cover;
-                background-position: center;
-                background-attachment: fixed;
-            }}
+            .stApp {{ background-image: url("data:image/png;base64,{base64_img}"); background-size: cover; background-attachment: fixed; }}
             .main {{ background-color: rgba(255, 255, 255, 0.85); padding: 20px; border-radius: 10px; }}
             </style>
             """, unsafe_allow_html=True
         )
     else:
-        bg_color = st.color_picker("배경색 지정 (이미지 없을 시)", "#F0F2F6")
+        bg_color = st.color_picker(t["bg_color"], "#F0F2F6")
         st.markdown(f"<style>.stApp {{ background-color: {bg_color}; }}</style>", unsafe_allow_html=True)
         
     st.divider()
 
-    # 소셜 미디어 API
-    st.header("🔑 소셜 미디어 API (로컬 캐시)")
+    st.header(t["api_setting"])
     if "sns_keys" not in st.session_state:
         st.session_state.sns_keys = {"instagram": "", "linkedin": ""}
-    
     st.session_state.sns_keys["instagram"] = st.text_input("Instagram API Key", type="password", value=st.session_state.sns_keys["instagram"])
     st.session_state.sns_keys["linkedin"] = st.text_input("LinkedIn API Key", type="password", value=st.session_state.sns_keys["linkedin"])
     
     st.divider()
 
-    # PM 방법론 선택
-    st.header("📊 프로젝트 관리 (PM) 기법")
-    pm_method = st.selectbox("PM 방법론", ["Agile (애자일)", "Scrum (스크럼)", "Kanban (칸반)", "Waterfall (워터폴)"])
+    st.header(t["pm_setting"])
+    pm_method = st.selectbox("Method", ["Agile", "Scrum", "Kanban", "Waterfall"], label_visibility="collapsed")
 
 # ==========================================
-# 메인 화면 UI
+# 메인 화면 UI (다국어 적용)
 # ==========================================
-st.title("🚀 AI PM 에이전트: 에밀리 v3.1")
-st.markdown(f"**현재 두뇌:** `{selected_model}` | **관리 기법:** `{pm_method}`")
+st.title(t["main_title"])
+st.markdown(f"**{t['current_brain']}:** `{selected_model}` | **{t['current_pm']}:** `{pm_method}`")
 
-idea = st.text_area("💡 진행할 프로젝트 아이디어나 목표를 적어주세요.", 
-                    placeholder="예: AI 기반 다이어트 앱 기획 및 런칭",
-                    height=120)
+idea = st.text_area(t["idea_label"], placeholder=t["idea_placeholder"], height=120)
 
 col1, col2 = st.columns(2)
 with col1:
-    need_code = st.checkbox("💻 핵심 기능 개발 코드 작성 (FE/BE)")
+    need_code = st.checkbox(t["need_code"])
 with col2:
-    need_sns = st.checkbox("📱 소셜 미디어 포스팅 자동 생성 및 배포 시뮬레이션")
+    need_sns = st.checkbox(t["need_sns"])
 
 # ==========================================
 # 에이전트 실행 로직
@@ -95,48 +139,49 @@ with col2:
 def run_agent_step(role, task, context):
     try:
         response = client.chat.completions.create(
-            model=selected_model, # 유저가 선택한 모델이 여기에 들어갑니다!
+            model=selected_model,
             messages=[
-                {"role": "system", "content": f"당신은 최고 수준의 {role}입니다. 마크다운을 적극 활용하고 가독성을 높이세요."},
-                {"role": "user", "content": f"전체 문맥: {context}\n\n현재 할 일: {task}"}
+                # 시스템 프롬프트에도 유저가 선택한 언어로 답변하도록 지시!
+                {"role": "system", "content": f"You are a top-tier {role}. You MUST answer in {lang}. Use markdown actively for readability."},
+                {"role": "user", "content": f"Context: {context}\n\nCurrent Task: {task}"}
             ],
-            temperature=temp, # 유저가 설정한 온도(창의성) 반영!
+            temperature=temp,
         )
         return response.choices[0].message.content
     except Exception as e:
-        return f"에러 발생: {str(e)}"
+        return f"Error: {str(e)}"
 
-if st.button("✨ 에밀리 PM 가동 시작!", use_container_width=True):
+if st.button(t["start_btn"], use_container_width=True):
     if not idea:
-        st.warning("프로젝트 내용을 입력해야 시작할 수 있어요!")
+        st.warning(t["warning_idea"])
     else:
         st.write("---")
         progress_bar = st.progress(0)
-        full_context = f"사용자 프로젝트: {idea}\n관리 방법론: {pm_method}"
+        full_context = f"Project Idea: {idea}\nPM Method: {pm_method}"
         
-        pm_prompt = f"이 프로젝트를 '{pm_method}' 방법론에 맞춰서 완벽하게 기획해줘. "
-        if "Kanban" in pm_method:
-            pm_prompt += "반드시 [To Do], [In Progress], [Done] 형식의 칸반 보드 텍스트 UI를 그려줘."
-        elif "Scrum" in pm_method:
-            pm_prompt += "Sprint 1, Sprint 2 형식으로 백로그(Backlog)와 태스크를 나누어줘."
-        elif "Agile" in pm_method:
-            pm_prompt += "사용자 스토리(User Story)와 에픽(Epic) 단위로 빠르게 이터레이션(Iteration)할 수 있는 계획을 짜줘."
+        pm_prompt = f"Plan this project perfectly using the '{pm_method}' methodology. "
+        if pm_method == "Kanban":
+            pm_prompt += "Draw a text-based Kanban board with [To Do], [In Progress], [Done] columns."
+        elif pm_method == "Scrum":
+            pm_prompt += "Divide the backlog and tasks into Sprint 1, Sprint 2, etc."
+        elif pm_method == "Agile":
+            pm_prompt += "Create a plan for rapid iteration using User Stories and Epics."
         else:
-            pm_prompt += "요구사항 분석 -> 설계 -> 구현 -> 테스트 -> 유지보수의 엄격한 폭포수 단계별로 일정을 짜줘."
+            pm_prompt += "Create a strict timeline following Requirements -> Design -> Implementation -> Testing -> Maintenance."
 
         steps = [
-            ("📊 프로젝트 매니저 (PM)", pm_prompt),
-            ("🏗️ 시스템 아키텍트", "위 계획을 바탕으로 서비스의 기술 스택과 데이터베이스 스키마를 설계해줘.")
+            ("Project Manager (PM)", pm_prompt),
+            ("System Architect", "Based on the plan, design the tech stack and database schema.")
         ]
         
         if need_code:
-            steps.append(("💻 리드 소프트웨어 엔지니어", "핵심 기능을 보여줄 수 있는 핵심 프론트엔드/백엔드 코드를 작성해줘."))
+            steps.append(("Lead Software Engineer", "Write core frontend/backend code snippets to demonstrate the main features."))
         if need_sns:
-            steps.append(("📱 그로스 마케터", "출시 홍보를 위한 인스타그램, 링크드인 포스팅 문구와 해시태그를 작성해줘."))
+            steps.append(("Growth Marketer", "Write promotional Instagram and LinkedIn post copies and hashtags."))
 
         for i, (step_name, task) in enumerate(steps):
-            with st.expander(f"🟢 {step_name} 작업 완료", expanded=True):
-                with st.spinner(f"[{selected_model}] 두뇌 풀가동 중..."):
+            with st.expander(f"🟢 {step_name} Done", expanded=True):
+                with st.spinner(f"[{selected_model}] is working..."):
                     result = run_agent_step(step_name, task, full_context)
                     st.markdown(result)
                     full_context += f"\n\n[{step_name}]\n{result}"
@@ -145,16 +190,16 @@ if st.button("✨ 에밀리 PM 가동 시작!", use_container_width=True):
 
         if need_sns:
             st.write("---")
-            st.subheader("🚀 소셜 미디어 자동 배포 상태")
+            st.subheader(t["sns_status"])
             if st.session_state.sns_keys["instagram"]:
-                st.success("✅ Instagram API 키 확인됨 -> 포스팅 자동 업로드 성공! (시뮬레이션)")
+                st.success("✅ Instagram API Key Found -> Auto-upload simulated successfully!")
             else:
-                st.warning("⚠️ Instagram API 키가 없습니다. 포스팅 문구만 생성되었습니다.")
+                st.warning("⚠️ No Instagram API Key. Only post text generated.")
                 
             if st.session_state.sns_keys["linkedin"]:
-                st.success("✅ LinkedIn API 키 확인됨 -> 포스팅 자동 업로드 성공! (시뮬레이션)")
+                st.success("✅ LinkedIn API Key Found -> Auto-upload simulated successfully!")
             else:
-                st.warning("⚠️ LinkedIn API 키가 없습니다. 포스팅 문구만 생성되었습니다.")
+                st.warning("⚠️ No LinkedIn API Key. Only post text generated.")
 
         st.balloons()
-        st.success(f"✅ [{selected_model}] 모델을 활용해 모든 프로젝트 세팅을 완료했습니다!")
+        st.success(f"✅ ✅ {t['success_msg']} `{selected_model}`!")
