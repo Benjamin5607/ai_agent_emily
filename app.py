@@ -157,7 +157,7 @@ def get_notion_title_col():
     return None
 
 # 2. 노션 카드 생성 함수 (추출된 Title 컬럼명 사용)
-def create_notion_task(task_name, description, title_col):
+def create_notion_task(task_name, description):
     url = "https://api.notion.com/v1/pages"
     headers = {
         "Authorization": f"Bearer {st.session_state.notion_token}",
@@ -165,11 +165,13 @@ def create_notion_task(task_name, description, title_col):
         "Notion-Version": "2022-06-28"
     }
     data = {
-        "parent": {"database_id": st.session_state.notion_db},
-        "properties": {title_col: {"title": [{"text": {"content": task_name}}]}},
+        "parent": {"database_id": st.session_state.notion_db_id}, # 주의: v5.1 변수명에 맞춤
+        "properties": {notion_title_col: {"title": [{"text": {"content": task_name}}]}},
         "children": [{"object": "block", "paragraph": {"rich_text": [{"text": {"content": description}}]}}]
     }
     response = requests.post(url, headers=headers, json=data)
+    
+    # 💡 성공 여부뿐만 아니라, 실패 시 노션이 보낸 '진짜 에러 원인'도 같이 반환하게 수정!
     return response.status_code == 200, response.text
 
 def run_agent_step(role, task, context):
@@ -244,15 +246,16 @@ if st.button(t["start_btn"], use_container_width=True):
                             messages=[{"role": "user", "content": f"Plan Context: {full_context}\n\nTask: {json_prompt}"}],
                             temperature=0.2
                         )
-                        clean_json = json_res.choices[0].message.content.replace("```json", "").replace("```", "").strip()
-                        tasks = json.loads(clean_json)
-                        
-                        for task in tasks:
-                            success, msg = create_notion_task(task['task_name'], task['description'], detected_title_col)
-                            if success:
-                                st.write(f"✅ {task['task_name']}")
-                            else:
-                                st.error(f"❌ Failed to add: {task['task_name']} (Error: {msg})")
+                       clean_json = json_res.choices[0].message.content.replace("```json", "").replace("```", "").strip()
+                    tasks = json.loads(clean_json)
+                    
+                    for task in tasks:
+                        # 💡 msg 변수를 추가로 받아서 에러 화면에 뿌려줌!
+                        success, msg = create_notion_task(task['task_name'], task['description'])
+                        if success:
+                            st.write(f"✅ {task['task_name']}")
+                        else:
+                            st.error(f"❌ 실패: {task['task_name']}\n\n🔍 노션의 답변: {msg}")
                     except Exception as e:
                         st.error(f"Notion task creation failed. JSON parsing error: {e}")
                         
