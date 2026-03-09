@@ -2,6 +2,7 @@ import streamlit as st
 import base64
 import requests
 import json
+import datetime
 from groq import Groq
 
 # ==========================================
@@ -20,7 +21,7 @@ ui_text = {
         "bg_upload": "로컬 이미지 선택",
         "bg_color": "배경색 지정",
         "pm_setting": "📊 프로젝트 관리 (PM) 기법",
-        "main_title": "🚀 AI PM 에이전트: 에밀리 v5.5 (올인원 워크스페이스)",
+        "main_title": "🚀 AI PM 에이전트: 에밀리 v5.6 (RACI & Timeline)",
         "current_brain": "현재 두뇌",
         "current_pm": "관리 기법",
         "idea_label": "💡 진행할 프로젝트 아이디어나 목표를 적어주세요.",
@@ -46,7 +47,7 @@ ui_text = {
         "bg_upload": "Upload Local Image",
         "bg_color": "Select Background Color",
         "pm_setting": "📊 Project Management Method",
-        "main_title": "🚀 AI PM Agent: Emily v5.5 (All-in-One)",
+        "main_title": "🚀 AI PM Agent: Emily v5.6 (RACI & Timeline)",
         "current_brain": "Current Brain",
         "current_pm": "PM Method",
         "idea_label": "💡 Describe your project idea or goal.",
@@ -83,9 +84,6 @@ def get_notion_databases(token):
         return None
     except: return None
 
-# ==========================================
-# 사이드바 1: API 키 입력 및 DB 자동 선택
-# ==========================================
 with st.sidebar:
     st.title(t["sidebar_title"])
     st.header(t["api_setting"])
@@ -108,9 +106,6 @@ with st.sidebar:
                 st.success("✅ DB 연결 준비 완료!")
     st.divider()
 
-# ==========================================
-# Groq 클라이언트 로드 및 UI 설정
-# ==========================================
 @st.cache_data(ttl=3600)
 def get_groq_models(api_key):
     try:
@@ -144,9 +139,6 @@ with st.sidebar:
     st.header(t["pm_setting"])
     pm_method = st.selectbox("Method", ["Agile", "Scrum", "Kanban", "Waterfall"], label_visibility="collapsed")
 
-# ==========================================
-# 메인 로직 및 노션 연동 함수
-# ==========================================
 st.title(t["main_title"])
 st.markdown(f"**{t['current_brain']}:** `{selected_model}` | **{t['current_pm']}:** `{pm_method}`")
 idea = st.text_area(t["idea_label"], placeholder=t["idea_placeholder"], height=120)
@@ -164,18 +156,29 @@ def get_notion_title_col(db_id):
             if prop_data.get("type") == "title": return prop_name
     return None
 
-# 💡 [핵심 추가 1] 마크다운 문서를 통째로 노션 카드로 만들어주는 전용 함수
+# 💡 [핵심 추가 1] 노션 데이터베이스 스키마 자동 업데이트 함수 (컬럼 추가)
+def setup_notion_db_properties(db_id):
+    url = f"https://api.notion.com/v1/databases/{db_id}"
+    headers = {"Authorization": f"Bearer {st.session_state.notion_token}", "Content-Type": "application/json", "Notion-Version": "2022-06-28"}
+    
+    # 노션 DB에 RACI, Required Tool, Timeline 속성이 없으면 자동으로 생성해버림!
+    data = {
+        "properties": {
+            "RACI": {"rich_text": {}},
+            "Required Tool": {"multi_select": {}},
+            "Timeline": {"date": {}}
+        }
+    }
+    requests.patch(url, headers=headers, json=data)
+
 def create_notion_doc_card(title, markdown_content, db_id, title_col):
     url = "https://api.notion.com/v1/pages"
     headers = {"Authorization": f"Bearer {st.session_state.notion_token}", "Content-Type": "application/json", "Notion-Version": "2022-06-28"}
-    
-    # 노션 API의 블록 텍스트 한도(2000자)를 피하기 위해 문단 단위로 쪼개기
     paragraphs = markdown_content.split('\n\n')
     children_blocks = []
     
     for para in paragraphs:
         if not para.strip(): continue
-        # 한 문단이 1900자를 넘어가면 강제 분할 (안전장치)
         chunks = [para[i:i+1900] for i in range(0, len(para), 1900)]
         for chunk in chunks:
             children_blocks.append({"object": "block", "paragraph": {"rich_text": [{"text": {"content": chunk}}]}})
@@ -183,16 +186,35 @@ def create_notion_doc_card(title, markdown_content, db_id, title_col):
     data = {
         "parent": {"database_id": db_id},
         "properties": {title_col: {"title": [{"text": {"content": title}}]}},
-        "children": children_blocks[:100] # API 1회 호출 최대 블록 수 제한(100개)
+        "children": children_blocks[:100] 
     }
     res = requests.post(url, headers=headers, json=data)
     return res.status_code == 200, res.text
 
-# 💡 [기존 유지] Jira 스타일의 실무 태스크 카드 생성 함수
-def create_notion_task(task_name, description, checklists, db_id, title_col):
+# 💡 [핵심 추가 2] 카드 생성 시 속성값(RACI, Tools, Timeline) 주입
+def create_notion_task(task_name, description, checklists, raci, tools, start_date, end_date, db_id, title_col):
     url = "https://api.notion.com/v1/pages"
     headers = {"Authorization": f"Bearer {st.session_state.notion_token}", "Content-Type": "application/json", "Notion-Version": "2022-06-28"}
     
+    # 기본 제목 세팅
+    props = {
+        title_col: {"title": [{"text": {"content": task_name}}]}
+    }
+    
+    # 1. RACI 속성 추가
+    if raci:
+        props["RACI"] = {"rich_text": [{"text": {"content": raci}}]}
+        
+    # 2. Required Tool 속성 추가 (콤마가 있으면 노션 에러가 나므로 공백으로 치환)
+    valid_tools = [{"name": t.replace(",", " ")} for t in tools if t]
+    if valid_tools:
+        props["Required Tool"] = {"multi_select": valid_tools}
+        
+    # 3. Timeline 속성 추가
+    if start_date and end_date:
+        props["Timeline"] = {"date": {"start": start_date, "end": end_date}}
+    
+    # 카드 본문 블록 (기존과 동일)
     children_blocks = [
         {"object": "block", "heading_2": {"rich_text": [{"text": {"content": "📝 작업 상세 (User Story)"}}]}},
         {"object": "block", "paragraph": {"rich_text": [{"text": {"content": description}}]}},
@@ -202,7 +224,7 @@ def create_notion_task(task_name, description, checklists, db_id, title_col):
     for item in checklists:
         children_blocks.append({"object": "block", "to_do": {"rich_text": [{"text": {"content": item}}], "checked": False}})
         
-    data = {"parent": {"database_id": db_id}, "properties": {title_col: {"title": [{"text": {"content": task_name}}]}}, "children": children_blocks}
+    data = {"parent": {"database_id": db_id}, "properties": props, "children": children_blocks}
     res = requests.post(url, headers=headers, json=data)
     return res.status_code == 200, res.text
 
@@ -216,9 +238,6 @@ def run_agent_step(role, task, context):
         return response.choices[0].message.content
     except Exception as e: return f"Error: {str(e)}"
 
-# ==========================================
-# 실행 엔진
-# ==========================================
 if st.button(t["start_btn"], use_container_width=True):
     if not st.session_state.groq_key: st.error(t["warning_api"])
     elif not idea: st.warning(t["warning_idea"])
@@ -226,8 +245,6 @@ if st.button(t["start_btn"], use_container_width=True):
         st.write("---")
         progress_bar = st.progress(0)
         full_context = f"Project Idea: {idea}\nPM Method: {pm_method}"
-        
-        # 💡 생성된 문서들을 저장할 딕셔너리 준비
         generated_docs = {}
         
         pm_prompt = f"Plan this project perfectly using the '{pm_method}' methodology. Divide into clear actionable tasks."
@@ -239,7 +256,7 @@ if st.button(t["start_btn"], use_container_width=True):
                 with st.spinner(f"[{selected_model}] is working..."):
                     result = run_agent_step(step_name, task, full_context)
                     st.markdown(result)
-                    generated_docs[step_name] = result # 문서를 딕셔너리에 저장!
+                    generated_docs[step_name] = result
                     full_context += f"\n\n[{step_name}]\n{result}"
             progress_bar.progress((i + 1) / (len(steps) + 2))
 
@@ -249,10 +266,9 @@ if st.button(t["start_btn"], use_container_width=True):
             with st.spinner("Generating Social Media threads..."):
                 sns_result = run_agent_step("Growth Marketer", "Write a highly engaging, text-based promotional thread for X (Twitter) and a professional post for LinkedIn about this project. Include relevant emojis and hashtags.", full_context)
                 st.info(sns_result)
-                generated_docs["Growth Marketer"] = sns_result # 마케팅 문서도 저장!
+                generated_docs["Growth Marketer"] = sns_result
             progress_bar.progress((len(steps) + 1) / (len(steps) + 2))
 
-        # 💡 노션 전송 시작
         if st.session_state.notion_token and selected_db_id:
             st.write("---")
             st.subheader(t["notion_status"])
@@ -261,7 +277,9 @@ if st.button(t["start_btn"], use_container_width=True):
                 
                 if not detected_title_col: st.error("❌ 선택한 DB의 구조를 읽어올 수 없습니다.")
                 else:
-                    # 1️⃣ [마스터 문서 카드 생성] 생성된 기획서, 코드 등을 별도의 위키 카드로 저장!
+                    # 💡 노션 DB에 속성(컬럼)들을 몰래 자동 추가합니다!
+                    setup_notion_db_properties(selected_db_id)
+                    
                     st.write("**📚 프로젝트 문서(Wiki) 카드 생성 중...**")
                     doc_icons = {"Project Manager (PM)": "📋 [마스터 플랜]", "System Architect": "🏗️ [아키텍처 및 DB 설계]", "Lead Software Engineer": "💻 [핵심 코드 스니펫]", "Growth Marketer": "📱 [마케팅/SNS 포스팅 초안]"}
                     
@@ -272,21 +290,27 @@ if st.button(t["start_btn"], use_container_width=True):
                         else: st.error(f"❌ {card_title} 생성 실패")
                     
                     st.write("---")
-                    st.write("**🛠️ 실무 태스크 카드(Jira 스타일) 생성 중...**")
+                    st.write("**🛠️ 실무 태스크 카드(RACI/Timeline) 생성 중...**")
                     
-                    # 2️⃣ [실무 태스크 카드 생성] PM 기법이 반영된 분류형 JSON 프롬프트!
+                    # 💡 [핵심 추가 3] 프롬프트에 RACI, Tools, Timeline (현재 날짜 기준) 추가 요청
+                    today_str = datetime.datetime.now().strftime("%Y-%m-%d")
                     json_prompt = f"""
                     프로젝트: {idea}
                     채택된 PM 방법론: {pm_method}
+                    오늘 날짜: {today_str}
                     
                     위 방법론에 맞추어 실제 개발을 위한 태스크 5~7개를 도출하세요.
-                    반드시 태스크 이름 앞에 방법론의 분류(예: [Sprint 1], [Phase 2], [Backlog], [Epic])를 붙여주세요.
-                    결과는 반드시 아래 JSON 배열 형식으로만 출력하세요.
+                    태스크 이름 앞에 분류(예: [Sprint 1])를 붙여주세요.
+                    결과는 반드시 아래 JSON 배열 형식으로만 출력하세요. (tools 배열 안의 텍스트에는 절대 콤마(,)를 쓰지 마세요)
                     [
                         {{
                             "task_name": "[Sprint 1] 회원가입 API 구현",
-                            "description": "사용자 정보를 DB에 저장하고 JWT 토큰을 발급하는 백엔드 API를 개발합니다.",
-                            "checklists": ["DB 유저 테이블 스키마 작성", "비밀번호 해싱 로직 구현", "포스트맨 테스트 완료"]
+                            "description": "사용자 정보를 DB에 저장하는 백엔드 API 개발",
+                            "checklists": ["DB 스키마 작성", "비밀번호 해싱", "포스트맨 테스트"],
+                            "raci": "R: Backend Dev, A: PM",
+                            "tools": ["Node.js", "PostgreSQL"],
+                            "start_date": "2026-03-10",
+                            "end_date": "2026-03-14"
                         }}
                     ]
                     """
@@ -301,7 +325,12 @@ if st.button(t["start_btn"], use_container_width=True):
                         
                         for task in tasks:
                             checklists = task.get("checklists", [])
-                            success, msg = create_notion_task(task['task_name'], task['description'], checklists, selected_db_id, detected_title_col)
+                            raci = task.get("raci", "")
+                            tools = task.get("tools", [])
+                            start_date = task.get("start_date", "")
+                            end_date = task.get("end_date", "")
+                            
+                            success, msg = create_notion_task(task['task_name'], task['description'], checklists, raci, tools, start_date, end_date, selected_db_id, detected_title_col)
                             if success: st.write(f"✅ {task['task_name']}")
                             else: st.error(f"❌ 실패: {task['task_name']} ({msg})")
                     except Exception as e:
