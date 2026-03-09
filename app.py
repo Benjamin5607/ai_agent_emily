@@ -5,15 +5,14 @@ import json
 from groq import Groq
 
 # ==========================================
-# 🌐 다국어 텍스트 사전 (UI Localization)
+# 🌐 다국어 텍스트 사전
 # ==========================================
 ui_text = {
     "한국어": {
         "sidebar_title": "⚙️ 에밀리 설정 패널",
-        "api_setting": "🔑 API 연동 (Bring Your Own Key)",
+        "api_setting": "🔑 API 연동 (BYOK)",
         "groq_key": "Groq API Key (필수)",
         "notion_token": "Notion 시크릿 토큰",
-        "notion_db": "Notion 데이터베이스 ID",
         "brain_setting": "🧠 에이전트 두뇌 설정",
         "select_model": "모델 선택",
         "temp_slider": "창의성 레벨 (Temperature)",
@@ -21,7 +20,7 @@ ui_text = {
         "bg_upload": "로컬 이미지 선택",
         "bg_color": "배경색 지정",
         "pm_setting": "📊 프로젝트 관리 (PM) 기법",
-        "main_title": "🚀 AI PM 에이전트: 에밀리 v5.2",
+        "main_title": "🚀 AI PM 에이전트: 에밀리 v5.3",
         "current_brain": "현재 두뇌",
         "current_pm": "관리 기법",
         "idea_label": "💡 진행할 프로젝트 아이디어나 목표를 적어주세요.",
@@ -40,7 +39,6 @@ ui_text = {
         "api_setting": "🔑 API Integration (BYOK)",
         "groq_key": "Groq API Key (Required)",
         "notion_token": "Notion Secret Token",
-        "notion_db": "Notion Database ID",
         "brain_setting": "🧠 Agent Brain Settings",
         "select_model": "Select Model",
         "temp_slider": "Creativity Level (Temperature)",
@@ -48,7 +46,7 @@ ui_text = {
         "bg_upload": "Upload Local Image",
         "bg_color": "Select Background Color",
         "pm_setting": "📊 Project Management Method",
-        "main_title": "🚀 AI PM Agent: Emily v5.2",
+        "main_title": "🚀 AI PM Agent: Emily v5.3",
         "current_brain": "Current Brain",
         "current_pm": "PM Method",
         "idea_label": "💡 Describe your project idea or goal.",
@@ -68,24 +66,63 @@ st.set_page_config(page_title="Emily AI: PM Agent", layout="wide")
 lang = st.sidebar.selectbox("🌐 언어 / Language", ["한국어", "English"])
 t = ui_text[lang]
 
+# 💡 [핵심 업데이트 1] 노션에서 사용 가능한 데이터베이스 목록을 검색하는 함수
+def get_notion_databases(token):
+    url = "https://api.notion.com/v1/search"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+        "Notion-Version": "2022-06-28"
+    }
+    data = {"filter": {"value": "database", "property": "object"}}
+    try:
+        response = requests.post(url, headers=headers, json=data)
+        if response.status_code == 200:
+            results = response.json().get("results", [])
+            db_dict = {}
+            for db in results:
+                # DB 제목 추출 (제목이 없는 경우 예외 처리)
+                title_arr = db.get("title", [])
+                title = title_arr[0].get("plain_text", "제목 없는 DB") if title_arr else "제목 없는 DB"
+                db_dict[f"🎯 {title}"] = db["id"]
+            return db_dict
+        return None
+    except:
+        return None
+
 # ==========================================
-# 사이드바 1: API 키 입력
+# 사이드바 1: API 키 입력 및 DB 자동 선택
 # ==========================================
 with st.sidebar:
     st.title(t["sidebar_title"])
     st.header(t["api_setting"])
     
-    for key in ["groq_key", "notion_token", "notion_db"]:
-        if key not in st.session_state:
-            st.session_state[key] = ""
+    if "groq_key" not in st.session_state: st.session_state.groq_key = ""
+    if "notion_token" not in st.session_state: st.session_state.notion_token = ""
             
     st.session_state.groq_key = st.text_input(t["groq_key"], type="password", value=st.session_state.groq_key)
     st.session_state.notion_token = st.text_input(t["notion_token"], type="password", value=st.session_state.notion_token)
-    st.session_state.notion_db = st.text_input(t["notion_db"], type="password", value=st.session_state.notion_db)
+    
+    # 💡 [핵심 업데이트 2] 토큰이 입력되면 자동으로 DB 목록을 불러옴!
+    selected_db_id = None
+    if st.session_state.notion_token:
+        with st.spinner("노션 DB 검색 중..."):
+            db_list = get_notion_databases(st.session_state.notion_token)
+            
+            if db_list is None:
+                st.error("❌ 토큰이 잘못되었습니다.")
+            elif len(db_list) == 0:
+                st.warning("⚠️ 접근 가능한 DB가 없습니다! 노션 페이지 우측 상단 `...` -> `연결 추가`에서 에밀리를 꼭 초대해주세요!")
+            else:
+                # 찾아낸 DB 목록을 드롭다운으로 보여줌
+                selected_db_name = st.selectbox("📌 연결할 노션 DB 선택", list(db_list.keys()))
+                selected_db_id = db_list[selected_db_name]
+                st.success("✅ DB 연결 준비 완료!")
+
     st.divider()
 
 # ==========================================
-# Groq 클라이언트 및 모델 로드
+# Groq 클라이언트 로드 및 나머지 설정
 # ==========================================
 @st.cache_data(ttl=3600)
 def get_groq_models(api_key):
@@ -103,9 +140,6 @@ else:
     client = None
     model_list = ["(API 키를 입력하세요)"]
 
-# ==========================================
-# 사이드바 2: 나머지 UI 설정
-# ==========================================
 with st.sidebar:
     st.header(t["brain_setting"])
     selected_model = st.selectbox(t["select_model"], model_list, index=0)
@@ -126,56 +160,35 @@ with st.sidebar:
     pm_method = st.selectbox("Method", ["Agile", "Scrum", "Kanban", "Waterfall"], label_visibility="collapsed")
 
 # ==========================================
-# 메인 화면 UI 및 실행 로직
+# 메인 로직 및 노션 API 함수
 # ==========================================
 st.title(t["main_title"])
 st.markdown(f"**{t['current_brain']}:** `{selected_model}` | **{t['current_pm']}:** `{pm_method}`")
-
 idea = st.text_area(t["idea_label"], placeholder=t["idea_placeholder"], height=120)
 
 col1, col2 = st.columns(2)
-with col1:
-    need_code = st.checkbox(t["need_code"])
-with col2:
-    need_sns = st.checkbox(t["need_sns"], value=True)
+with col1: need_code = st.checkbox(t["need_code"])
+with col2: need_sns = st.checkbox(t["need_sns"], value=True)
 
-# 💡 [디버그 모드 추가] 1. 노션 데이터베이스에서 Title 컬럼명 자동 추출 함수
-def get_notion_title_col():
-    url = f"https://api.notion.com/v1/databases/{st.session_state.notion_db}"
-    headers = {
-        "Authorization": f"Bearer {st.session_state.notion_token}",
-        "Notion-Version": "2022-06-28"
-    }
-    response = requests.get(url, headers=headers)
-    
-    if response.status_code == 200:
-        db_info = response.json()
-        for prop_name, prop_data in db_info.get("properties", {}).items():
-            if prop_data.get("type") == "title":
-                return prop_name
-        st.error("🔍 디버그: 연결은 성공했는데 'title' 속성을 못 찾았어요!")
-    else:
-        # 노션이 뱉은 진짜 에러를 화면에 띄움!
-        st.error(f"🔍 노션 찐 에러 로그 [{response.status_code}]: {response.text}")
-        
+def get_notion_title_col(db_id):
+    url = f"https://api.notion.com/v1/databases/{db_id}"
+    headers = {"Authorization": f"Bearer {st.session_state.notion_token}", "Notion-Version": "2022-06-28"}
+    res = requests.get(url, headers=headers)
+    if res.status_code == 200:
+        for prop_name, prop_data in res.json().get("properties", {}).items():
+            if prop_data.get("type") == "title": return prop_name
     return None
 
-# 💡 [핵심 수정 2] 노션 카드 생성 함수 (title_col 인자 추가 및 변수명 수정)
-def create_notion_task(task_name, description, title_col):
+def create_notion_task(task_name, description, db_id, title_col):
     url = "https://api.notion.com/v1/pages"
-    headers = {
-        "Authorization": f"Bearer {st.session_state.notion_token}",
-        "Content-Type": "application/json",
-        "Notion-Version": "2022-06-28"
-    }
+    headers = {"Authorization": f"Bearer {st.session_state.notion_token}", "Content-Type": "application/json", "Notion-Version": "2022-06-28"}
     data = {
-        "parent": {"database_id": st.session_state.notion_db},
+        "parent": {"database_id": db_id},
         "properties": {title_col: {"title": [{"text": {"content": task_name}}]}},
         "children": [{"object": "block", "paragraph": {"rich_text": [{"text": {"content": description}}]}}]
     }
-    response = requests.post(url, headers=headers, json=data)
-    
-    return response.status_code == 200, response.text
+    res = requests.post(url, headers=headers, json=data)
+    return res.status_code == 200, res.text
 
 def run_agent_step(role, task, context):
     try:
@@ -201,14 +214,9 @@ if st.button(t["start_btn"], use_container_width=True):
         progress_bar = st.progress(0)
         full_context = f"Project Idea: {idea}\nPM Method: {pm_method}"
         
-        # 1. 기획 단계
         pm_prompt = f"Plan this project perfectly using the '{pm_method}' methodology. Divide into clear actionable tasks."
-        steps = [
-            ("Project Manager (PM)", pm_prompt),
-            ("System Architect", "Based on the plan, design the tech stack and database schema.")
-        ]
-        if need_code:
-            steps.append(("Lead Software Engineer", "Write core frontend/backend code snippets."))
+        steps = [("Project Manager (PM)", pm_prompt), ("System Architect", "Based on the plan, design the tech stack and database schema.")]
+        if need_code: steps.append(("Lead Software Engineer", "Write core frontend/backend code snippets."))
             
         for i, (step_name, task) in enumerate(steps):
             with st.expander(f"🟢 {step_name} Done", expanded=True):
@@ -218,33 +226,25 @@ if st.button(t["start_btn"], use_container_width=True):
                     full_context += f"\n\n[{step_name}]\n{result}"
             progress_bar.progress((i + 1) / (len(steps) + 2))
 
-        # 2. SNS 생성
         if need_sns:
             st.write("---")
             st.subheader(t["sns_status"])
             with st.spinner("Generating Social Media threads..."):
-                sns_task = "Write a highly engaging, text-based promotional thread for X (Twitter) and a professional post for LinkedIn about this project. Include relevant emojis and hashtags."
-                sns_result = run_agent_step("Growth Marketer", sns_task, full_context)
+                sns_result = run_agent_step("Growth Marketer", "Write a highly engaging, text-based promotional thread for X (Twitter) and a professional post for LinkedIn about this project. Include relevant emojis and hashtags.", full_context)
                 st.info(sns_result)
             progress_bar.progress((len(steps) + 1) / (len(steps) + 2))
 
-        # 3. 노션 연동 (자동 감지 로직 적용 및 들여쓰기 에러 해결)
-        if st.session_state.notion_token and st.session_state.notion_db:
+        # 💡 [핵심 업데이트 3] 선택된 DB ID를 사용하여 작업 수행
+        if st.session_state.notion_token and selected_db_id:
             st.write("---")
             st.subheader(t["notion_status"])
-            with st.spinner("노션 데이터베이스 분석 및 태스크 전송 중..."):
-                
-                # DB에서 Title 컬럼명 자동 찾기
-                detected_title_col = get_notion_title_col()
+            with st.spinner("노션 데이터베이스에 태스크 전송 중..."):
+                detected_title_col = get_notion_title_col(selected_db_id)
                 
                 if not detected_title_col:
-                    st.error("❌ Notion API 연결 실패: 토큰이나 DB ID가 잘못되었거나 접근 권한이 없습니다.")
+                    st.error("❌ 선택한 DB의 구조를 읽어올 수 없습니다.")
                 else:
-                    st.info(f"💡 노션 타이틀 컬럼 자동 감지 성공: '{detected_title_col}'")
-                    
                     json_prompt = f"Based on the PM plan above, extract 5 to 7 core tasks. You MUST return ONLY a valid JSON array like this: [{{\"task_name\": \"Task 1\", \"description\": \"Details\"}}]. Do not add any other text or markdown."
-                    
-                    # 💡 [핵심 수정 3] try...except 블록 들여쓰기 정상화
                     try:
                         json_res = client.chat.completions.create(
                             model=selected_model,
@@ -255,17 +255,16 @@ if st.button(t["start_btn"], use_container_width=True):
                         tasks = json.loads(clean_json)
                         
                         for task in tasks:
-                            # 💡 함수에 detected_title_col 변수를 제대로 전달!
-                            success, msg = create_notion_task(task['task_name'], task['description'], detected_title_col)
+                            success, msg = create_notion_task(task['task_name'], task['description'], selected_db_id, detected_title_col)
                             if success:
                                 st.write(f"✅ {task['task_name']}")
                             else:
-                                st.error(f"❌ 실패: {task['task_name']}\n\n🔍 노션의 답변: {msg}")
+                                st.error(f"❌ 실패: {task['task_name']}\n\n🔍 에러: {msg}")
                     except Exception as e:
-                        st.error(f"Notion task creation failed. JSON parsing error: {e}")
+                        st.error(f"JSON 파싱 에러 (AI가 형식을 어겼습니다): {e}")
                         
         elif not st.session_state.notion_token:
-            st.info("💡 Tip: Enter Notion API keys in the sidebar to auto-create Kanban boards!")
+            st.info("💡 Tip: 사이드바에 Notion 토큰을 입력하면 노션 칸반 보드가 자동 생성됩니다!")
             
         progress_bar.progress(1.0)
         st.balloons()
