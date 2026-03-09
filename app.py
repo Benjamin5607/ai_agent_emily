@@ -5,7 +5,7 @@ import json
 from groq import Groq
 
 # ==========================================
-# 🌐 다국어 텍스트 사전 (BYOK 항목 추가)
+# 🌐 다국어 텍스트 사전 (UI Localization)
 # ==========================================
 ui_text = {
     "한국어": {
@@ -14,7 +14,7 @@ ui_text = {
         "groq_key": "Groq API Key (필수)",
         "notion_token": "Notion 시크릿 토큰",
         "notion_db": "Notion 데이터베이스 ID",
-        "notion_col": "노션 제목 속성명 (기본: 이름)",
+        # notion_col 입력란 삭제! AI가 알아서 찾음.
         "brain_setting": "🧠 에이전트 두뇌 설정",
         "select_model": "모델 선택",
         "temp_slider": "창의성 레벨 (Temperature)",
@@ -22,7 +22,7 @@ ui_text = {
         "bg_upload": "로컬 이미지 선택",
         "bg_color": "배경색 지정",
         "pm_setting": "📊 프로젝트 관리 (PM) 기법",
-        "main_title": "🚀 AI PM 에이전트: 에밀리 v5.1",
+        "main_title": "🚀 AI PM 에이전트: 에밀리 v5.2",
         "current_brain": "현재 두뇌",
         "current_pm": "관리 기법",
         "idea_label": "💡 진행할 프로젝트 아이디어나 목표를 적어주세요.",
@@ -42,7 +42,6 @@ ui_text = {
         "groq_key": "Groq API Key (Required)",
         "notion_token": "Notion Secret Token",
         "notion_db": "Notion Database ID",
-        "notion_col": "Notion Title Column (Default: Name)",
         "brain_setting": "🧠 Agent Brain Settings",
         "select_model": "Select Model",
         "temp_slider": "Creativity Level (Temperature)",
@@ -50,7 +49,7 @@ ui_text = {
         "bg_upload": "Upload Local Image",
         "bg_color": "Select Background Color",
         "pm_setting": "📊 Project Management Method",
-        "main_title": "🚀 AI PM Agent: Emily v5.1",
+        "main_title": "🚀 AI PM Agent: Emily v5.2",
         "current_brain": "Current Brain",
         "current_pm": "PM Method",
         "idea_label": "💡 Describe your project idea or goal.",
@@ -66,32 +65,28 @@ ui_text = {
     }
 }
 
-st.set_page_config(page_title="Emily AI: BYOK PM Agent", layout="wide")
-
+st.set_page_config(page_title="Emily AI: PM Agent", layout="wide")
 lang = st.sidebar.selectbox("🌐 언어 / Language", ["한국어", "English"])
 t = ui_text[lang]
 
 # ==========================================
-# 사이드바 1: API 키 입력 (세션 유지 + 브라우저 자동완성 유도)
+# 사이드바 1: API 키 입력
 # ==========================================
 with st.sidebar:
     st.title(t["sidebar_title"])
     st.header(t["api_setting"])
     
-    # Session State 초기화
     for key in ["groq_key", "notion_token", "notion_db"]:
         if key not in st.session_state:
             st.session_state[key] = ""
             
-    # type="password"로 설정해 스마트폰 키체인(비밀번호 저장) 유도!
     st.session_state.groq_key = st.text_input(t["groq_key"], type="password", value=st.session_state.groq_key)
     st.session_state.notion_token = st.text_input(t["notion_token"], type="password", value=st.session_state.notion_token)
     st.session_state.notion_db = st.text_input(t["notion_db"], type="password", value=st.session_state.notion_db)
-    notion_title_col = st.text_input(t["notion_col"], "이름" if lang == "한국어" else "Name")
     st.divider()
 
 # ==========================================
-# Groq 클라이언트 및 모델 로드 (BYOK)
+# Groq 클라이언트 및 모델 로드
 # ==========================================
 @st.cache_data(ttl=3600)
 def get_groq_models(api_key):
@@ -102,7 +97,6 @@ def get_groq_models(api_key):
     except:
         return ["llama3-70b-8192", "llama3-8b-8192"]
 
-# API 키가 입력되었을 때만 모델 리스트를 불러오고 클라이언트를 활성화
 if st.session_state.groq_key:
     client = Groq(api_key=st.session_state.groq_key)
     model_list = get_groq_models(st.session_state.groq_key)
@@ -146,7 +140,24 @@ with col1:
 with col2:
     need_sns = st.checkbox(t["need_sns"], value=True)
 
-def create_notion_task(task_name, description):
+# 💡 [핵심 업데이트] 1. 노션 데이터베이스에서 Title 컬럼명 자동 추출 함수
+def get_notion_title_col():
+    url = f"https://api.notion.com/v1/databases/{st.session_state.notion_db}"
+    headers = {
+        "Authorization": f"Bearer {st.session_state.notion_token}",
+        "Notion-Version": "2022-06-28"
+    }
+    response = requests.get(url, headers=headers)
+    if response.status_code == 200:
+        db_info = response.json()
+        # 속성들 중에서 type이 'title'인 녀석의 진짜 이름을 찾아냄!
+        for prop_name, prop_data in db_info.get("properties", {}).items():
+            if prop_data.get("type") == "title":
+                return prop_name
+    return None
+
+# 2. 노션 카드 생성 함수 (추출된 Title 컬럼명 사용)
+def create_notion_task(task_name, description, title_col):
     url = "https://api.notion.com/v1/pages"
     headers = {
         "Authorization": f"Bearer {st.session_state.notion_token}",
@@ -155,11 +166,11 @@ def create_notion_task(task_name, description):
     }
     data = {
         "parent": {"database_id": st.session_state.notion_db},
-        "properties": {notion_title_col: {"title": [{"text": {"content": task_name}}]}},
+        "properties": {title_col: {"title": [{"text": {"content": task_name}}]}},
         "children": [{"object": "block", "paragraph": {"rich_text": [{"text": {"content": description}}]}}]
     }
     response = requests.post(url, headers=headers, json=data)
-    return response.status_code == 200
+    return response.status_code == 200, response.text
 
 def run_agent_step(role, task, context):
     try:
@@ -212,29 +223,39 @@ if st.button(t["start_btn"], use_container_width=True):
                 st.info(sns_result)
             progress_bar.progress((len(steps) + 1) / (len(steps) + 2))
 
-        # 3. 노션 연동
+        # 3. 노션 연동 (자동 감지 로직 적용)
         if st.session_state.notion_token and st.session_state.notion_db:
             st.write("---")
             st.subheader(t["notion_status"])
-            with st.spinner("Extracting tasks & pushing to Notion..."):
-                json_prompt = f"Based on the PM plan above, extract 5 to 7 core tasks. You MUST return ONLY a valid JSON array like this: [{{\"task_name\": \"Task 1\", \"description\": \"Details\"}}]. Do not add any other text or markdown."
-                try:
-                    json_res = client.chat.completions.create(
-                        model=selected_model,
-                        messages=[{"role": "user", "content": f"Plan Context: {full_context}\n\nTask: {json_prompt}"}],
-                        temperature=0.2
-                    )
-                    clean_json = json_res.choices[0].message.content.replace("```json", "").replace("```", "").strip()
-                    tasks = json.loads(clean_json)
+            with st.spinner("노션 데이터베이스 분석 및 태스크 전송 중..."):
+                
+                # DB에서 Title 컬럼명 자동 찾기
+                detected_title_col = get_notion_title_col()
+                
+                if not detected_title_col:
+                    st.error("❌ Notion API 연결 실패: 토큰이나 DB ID가 잘못되었거나 접근 권한이 없습니다.")
+                else:
+                    st.info(f"💡 노션 타이틀 컬럼 자동 감지 성공: '{detected_title_col}'")
                     
-                    for task in tasks:
-                        success = create_notion_task(task['task_name'], task['description'])
-                        if success:
-                            st.write(f"✅ {task['task_name']}")
-                        else:
-                            st.error(f"❌ Failed to add: {task['task_name']} (Check Notion Column Name)")
-                except Exception as e:
-                    st.error(f"Notion task creation failed. JSON parsing error: {e}")
+                    json_prompt = f"Based on the PM plan above, extract 5 to 7 core tasks. You MUST return ONLY a valid JSON array like this: [{{\"task_name\": \"Task 1\", \"description\": \"Details\"}}]. Do not add any other text or markdown."
+                    try:
+                        json_res = client.chat.completions.create(
+                            model=selected_model,
+                            messages=[{"role": "user", "content": f"Plan Context: {full_context}\n\nTask: {json_prompt}"}],
+                            temperature=0.2
+                        )
+                        clean_json = json_res.choices[0].message.content.replace("```json", "").replace("```", "").strip()
+                        tasks = json.loads(clean_json)
+                        
+                        for task in tasks:
+                            success, msg = create_notion_task(task['task_name'], task['description'], detected_title_col)
+                            if success:
+                                st.write(f"✅ {task['task_name']}")
+                            else:
+                                st.error(f"❌ Failed to add: {task['task_name']} (Error: {msg})")
+                    except Exception as e:
+                        st.error(f"Notion task creation failed. JSON parsing error: {e}")
+                        
         elif not st.session_state.notion_token:
             st.info("💡 Tip: Enter Notion API keys in the sidebar to auto-create Kanban boards!")
             
