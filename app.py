@@ -246,7 +246,7 @@ if st.button(t["start_btn"], use_container_width=True):
                             messages=[{"role": "user", "content": f"Plan Context: {full_context}\n\nTask: {json_prompt}"}],
                             temperature=0.2
                         )
-                       clean_json = json_res.choices[0].message.content.replace("```json", "").replace("```", "").strip()
+                    clean_json = json_res.choices[0].message.content.replace("```json", "").replace("```", "").strip()
                     tasks = json.loads(clean_json)
                     
                     for task in tasks:
