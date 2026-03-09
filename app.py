@@ -20,7 +20,7 @@ ui_text = {
         "bg_upload": "로컬 이미지 선택",
         "bg_color": "배경색 지정",
         "pm_setting": "📊 프로젝트 관리 (PM) 기법",
-        "main_title": "🚀 AI PM 에이전트: 에밀리 v5.3",
+        "main_title": "🚀 AI PM 에이전트: 에밀리 v5.4 (Jira 에디션)",
         "current_brain": "현재 두뇌",
         "current_pm": "관리 기법",
         "idea_label": "💡 진행할 프로젝트 아이디어나 목표를 적어주세요.",
@@ -30,7 +30,7 @@ ui_text = {
         "start_btn": "✨ 에밀리 PM 가동 시작!",
         "warning_idea": "프로젝트 내용을 입력해야 시작할 수 있어요!",
         "warning_api": "사이드바에 Groq API Key를 먼저 입력해주세요!",
-        "notion_status": "📝 Notion 칸반 보드 자동 생성",
+        "notion_status": "📝 Notion 칸반 보드 자동 생성 (Jira 스타일)",
         "sns_status": "🚀 텍스트 기반 소셜 미디어 포스팅",
         "success_msg": "모든 프로젝트 세팅을 완료했습니다!"
     },
@@ -46,7 +46,7 @@ ui_text = {
         "bg_upload": "Upload Local Image",
         "bg_color": "Select Background Color",
         "pm_setting": "📊 Project Management Method",
-        "main_title": "🚀 AI PM Agent: Emily v5.3",
+        "main_title": "🚀 AI PM Agent: Emily v5.4 (Jira Edition)",
         "current_brain": "Current Brain",
         "current_pm": "PM Method",
         "idea_label": "💡 Describe your project idea or goal.",
@@ -66,7 +66,6 @@ st.set_page_config(page_title="Emily AI: PM Agent", layout="wide")
 lang = st.sidebar.selectbox("🌐 언어 / Language", ["한국어", "English"])
 t = ui_text[lang]
 
-# 💡 [핵심 업데이트 1] 노션에서 사용 가능한 데이터베이스 목록을 검색하는 함수
 def get_notion_databases(token):
     url = "https://api.notion.com/v1/search"
     headers = {
@@ -81,7 +80,6 @@ def get_notion_databases(token):
             results = response.json().get("results", [])
             db_dict = {}
             for db in results:
-                # DB 제목 추출 (제목이 없는 경우 예외 처리)
                 title_arr = db.get("title", [])
                 title = title_arr[0].get("plain_text", "제목 없는 DB") if title_arr else "제목 없는 DB"
                 db_dict[f"🎯 {title}"] = db["id"]
@@ -103,22 +101,18 @@ with st.sidebar:
     st.session_state.groq_key = st.text_input(t["groq_key"], type="password", value=st.session_state.groq_key)
     st.session_state.notion_token = st.text_input(t["notion_token"], type="password", value=st.session_state.notion_token)
     
-    # 💡 [핵심 업데이트 2] 토큰이 입력되면 자동으로 DB 목록을 불러옴!
     selected_db_id = None
     if st.session_state.notion_token:
         with st.spinner("노션 DB 검색 중..."):
             db_list = get_notion_databases(st.session_state.notion_token)
-            
             if db_list is None:
                 st.error("❌ 토큰이 잘못되었습니다.")
             elif len(db_list) == 0:
-                st.warning("⚠️ 접근 가능한 DB가 없습니다! 노션 페이지 우측 상단 `...` -> `연결 추가`에서 에밀리를 꼭 초대해주세요!")
+                st.warning("⚠️ 접근 가능한 DB가 없습니다! 노션 페이지 우측 상단 `...` -> `연결 추가`에서 에밀리를 초대해주세요!")
             else:
-                # 찾아낸 DB 목록을 드롭다운으로 보여줌
                 selected_db_name = st.selectbox("📌 연결할 노션 DB 선택", list(db_list.keys()))
                 selected_db_id = db_list[selected_db_name]
                 st.success("✅ DB 연결 준비 완료!")
-
     st.divider()
 
 # ==========================================
@@ -160,7 +154,7 @@ with st.sidebar:
     pm_method = st.selectbox("Method", ["Agile", "Scrum", "Kanban", "Waterfall"], label_visibility="collapsed")
 
 # ==========================================
-# 메인 로직 및 노션 API 함수
+# 메인 로직
 # ==========================================
 st.title(t["main_title"])
 st.markdown(f"**{t['current_brain']}:** `{selected_model}` | **{t['current_pm']}:** `{pm_method}`")
@@ -179,14 +173,36 @@ def get_notion_title_col(db_id):
             if prop_data.get("type") == "title": return prop_name
     return None
 
-def create_notion_task(task_name, description, db_id, title_col):
+# 💡 [핵심 업데이트 1] 노션 API 페이로드를 Atlassian(Jira) 스타일로 완벽하게 뜯어고쳤습니다!
+def create_notion_task(task_name, description, checklists, db_id, title_col):
     url = "https://api.notion.com/v1/pages"
     headers = {"Authorization": f"Bearer {st.session_state.notion_token}", "Content-Type": "application/json", "Notion-Version": "2022-06-28"}
+    
+    # 카드 내부에 들어갈 콘텐츠 블록 (Jira 스타일)
+    children_blocks = [
+        # 1. H2 헤딩: 상세 내역
+        {"object": "block", "heading_2": {"rich_text": [{"text": {"content": "📝 작업 상세 내역 (User Story)"}}]}},
+        # 2. 본문 설명
+        {"object": "block", "paragraph": {"rich_text": [{"text": {"content": description}}]}},
+        # 3. 구분선
+        {"object": "block", "divider": {}},
+        # 4. H3 헤딩: 체크리스트
+        {"object": "block", "heading_3": {"rich_text": [{"text": {"content": "✅ 서브 태스크 (To-Do)"}}]}}
+    ]
+    
+    # 5. 체크리스트 내용들을 노션의 진짜 '체크박스' 블록으로 하나씩 추가
+    for item in checklists:
+        children_blocks.append({
+            "object": "block",
+            "to_do": {"rich_text": [{"text": {"content": item}}], "checked": False}
+        })
+        
     data = {
         "parent": {"database_id": db_id},
         "properties": {title_col: {"title": [{"text": {"content": task_name}}]}},
-        "children": [{"object": "block", "paragraph": {"rich_text": [{"text": {"content": description}}]}}]
+        "children": children_blocks
     }
+    
     res = requests.post(url, headers=headers, json=data)
     return res.status_code == 200, res.text
 
@@ -234,34 +250,48 @@ if st.button(t["start_btn"], use_container_width=True):
                 st.info(sns_result)
             progress_bar.progress((len(steps) + 1) / (len(steps) + 2))
 
-        # 💡 [핵심 업데이트 3] 선택된 DB ID를 사용하여 작업 수행
         if st.session_state.notion_token and selected_db_id:
             st.write("---")
             st.subheader(t["notion_status"])
-            with st.spinner("노션 데이터베이스에 태스크 전송 중..."):
+            with st.spinner("Jira 스타일로 노션 태스크 생성 중..."):
                 detected_title_col = get_notion_title_col(selected_db_id)
                 
                 if not detected_title_col:
                     st.error("❌ 선택한 DB의 구조를 읽어올 수 없습니다.")
                 else:
-                    json_prompt = f"Based on the PM plan above, extract 5 to 7 core tasks. You MUST return ONLY a valid JSON array like this: [{{\"task_name\": \"Task 1\", \"description\": \"Details\"}}]. Do not add any other text or markdown."
+                    # 💡 [핵심 업데이트 2] 프롬프트 수정: 체크리스트를 포함한 JSON 요구 + 토큰 에러 방지를 위해 맥락 축소!
+                    json_prompt = f"""
+                    프로젝트 아이디어: {idea}
+                    위 프로젝트를 성공시키기 위한 핵심 태스크 5~7개를 도출하세요.
+                    Atlassian Jira 티켓처럼 작성해야 합니다. 결과는 반드시 아래 JSON 배열 형식으로만 출력하세요.
+                    [
+                        {{
+                            "task_name": "[FE] 로그인 화면 UI 구현",
+                            "description": "사용자가 이메일과 비밀번호로 로그인할 수 있는 화면을 구현합니다. (에러 메시지 처리 포함)",
+                            "checklists": ["UI 레이아웃 퍼블리싱", "입력 폼 유효성 검사 로직 추가", "API 연동 테스트"]
+                        }}
+                    ]
+                    """
                     try:
+                        # 💡 [핵심 업데이트 3] full_context를 빼고 짧은 프롬프트만 보내서 Rate Limit 413 에러를 원천 차단!
                         json_res = client.chat.completions.create(
                             model=selected_model,
-                            messages=[{"role": "user", "content": f"Plan Context: {full_context}\n\nTask: {json_prompt}"}],
+                            messages=[{"role": "user", "content": json_prompt}],
                             temperature=0.2
                         )
                         clean_json = json_res.choices[0].message.content.replace("```json", "").replace("```", "").strip()
                         tasks = json.loads(clean_json)
                         
                         for task in tasks:
-                            success, msg = create_notion_task(task['task_name'], task['description'], selected_db_id, detected_title_col)
+                            # 체크리스트 항목이 없을 경우를 대비해 빈 리스트 반환
+                            checklists = task.get("checklists", [])
+                            success, msg = create_notion_task(task['task_name'], task['description'], checklists, selected_db_id, detected_title_col)
                             if success:
                                 st.write(f"✅ {task['task_name']}")
                             else:
                                 st.error(f"❌ 실패: {task['task_name']}\n\n🔍 에러: {msg}")
                     except Exception as e:
-                        st.error(f"JSON 파싱 에러 (AI가 형식을 어겼습니다): {e}")
+                        st.error(f"JSON 파싱 에러 (가벼운 모델로 변경해주세요): {e}")
                         
         elif not st.session_state.notion_token:
             st.info("💡 Tip: 사이드바에 Notion 토큰을 입력하면 노션 칸반 보드가 자동 생성됩니다!")
