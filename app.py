@@ -139,7 +139,7 @@ with col1:
 with col2:
     need_sns = st.checkbox(t["need_sns"], value=True)
 
-# 💡 [핵심 수정 1] 노션 데이터베이스에서 Title 컬럼명 자동 추출 함수
+# 💡 [디버그 모드 추가] 1. 노션 데이터베이스에서 Title 컬럼명 자동 추출 함수
 def get_notion_title_col():
     url = f"https://api.notion.com/v1/databases/{st.session_state.notion_db}"
     headers = {
@@ -147,11 +147,17 @@ def get_notion_title_col():
         "Notion-Version": "2022-06-28"
     }
     response = requests.get(url, headers=headers)
+    
     if response.status_code == 200:
         db_info = response.json()
         for prop_name, prop_data in db_info.get("properties", {}).items():
             if prop_data.get("type") == "title":
                 return prop_name
+        st.error("🔍 디버그: 연결은 성공했는데 'title' 속성을 못 찾았어요!")
+    else:
+        # 노션이 뱉은 진짜 에러를 화면에 띄움!
+        st.error(f"🔍 노션 찐 에러 로그 [{response.status_code}]: {response.text}")
+        
     return None
 
 # 💡 [핵심 수정 2] 노션 카드 생성 함수 (title_col 인자 추가 및 변수명 수정)
